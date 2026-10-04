@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>100 KM Yolculuk</title>
+<style>
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:#18212b;color:white;font-family:Arial,sans-serif;
+    display:flex;justify-content:center;min-height:100vh;
+  }
+  #gameWrap{width:min(100vw,700px);padding:10px}
+  h1{text-align:center;margin:4px 0 8px;font-size:24px}
+  .top{
+    display:flex;justify-content:space-between;gap:8px;align-items:center;
+    background:#263544;padding:9px 12px;border-radius:12px;margin-bottom:8px;
+    font-weight:bold;
+  }
+  canvas{
+    width:100%;height:auto;display:block;border-radius:14px;
+    background:#7fc96b;box-shadow:0 5px 20px #0006;
+    touch-action:none;
+  }
+  .panel{
+    background:#263544;border-radius:14px;padding:10px;margin-top:8px;
+  }
+  .colors{display:flex;align-items:center;gap:10px;justify-content:center;flex-wrap:wrap}
+  .colors label{font-size:14px}
+  input[type=color]{width:55px;height:38px;border:0;border-radius:8px;padding:2px}
+  .controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+  button{
+    border:0;border-radius:12px;padding:15px 5px;font-size:18px;font-weight:bold;
+    background:#3b82f6;color:white;box-shadow:0 3px 0 #2056a5;
+    touch-action:manipulation;
+  }
+  button:active{transform:translateY(2px);box-shadow:none}
+  #forward{background:#22a06b;box-shadow:0 3px 0 #126342}
+  #restart{background:#e67e22;box-shadow:0 3px 0 #9c4e0e;width:100%;margin-top:8px}
+  .hint{text-align:center;font-size:13px;color:#cbd5e1;margin:8px 0 0}
+  #message{
+    display:none;position:fixed;inset:0;background:#000b;z-index:5;
+    align-items:center;justify-content:center;padding:20px;
+  }
+  .winbox{
+    background:#263544;border-radius:20px;padding:28px;text-align:center;
+    max-width:360px;box-shadow:0 10px 40px #000;
+  }
+  .winbox h2{font-size:34px;margin:0 0 10px;color:#4ade80}
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <h1>🚗 100 KM Yolculuk</h1>
+  <div class="top">
+    <span id="distance">0.0 / 100 KM</span>
+    <span id="status">▶ Oynamaya hazır</span>
+  </div>
+  <canvas id="game" width="600" height="650"></canvas>
+
+  <div class="panel">
+    <div class="colors">
+      <label for="carColor">Arabanın rengini seç:</label>
+      <input id="carColor" type="color" value="#e53935">
+    </div>
+    <div class="controls">
+      <button id="left">⬅ SOL</button>
+      <button id="right">SAĞ ➡</button>
+    </div>
+    <button id="restart">🔄 Yeniden Başlat</button>
+    <div class="hint">Bilgisayarda: ↑ İleri · ← Sol · → Sağ</div>
+  </div>
+</div>
+
+<div id="message">
+  <div class="winbox">
+    <h2>🏆 KAZANDINIZ!</h2>
+    <p>Araba 100 kilometrelik yolu tamamladı.</p>
+    <button id="again">Tekrar Oyna</button>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
+const W=canvas.width,H=canvas.height;
+const colorInput=document.getElementById("carColor");
+const distanceEl=document.getElementById("distance");
+const statusEl=document.getElementById("status");
+const message=document.getElementById("message");
+
+let car, obstacles, distance, running, lastTime, spawnTimer, roadOffset, score;
+const obstacleTypes=["🪑","🗑️","📦","🛒","🪨"];
+
+function reset(){
+  car={x:W/2,y:H-105,w:52,h:82,speed:1.05};
+  obstacles=[];
+  distance=0; score=0; running=false; lastTime=0; spawnTimer=0; roadOffset=0;
+  message.style.display="none";
+  statusEl.textContent="▶ Oynamaya hazır";
+  updateDistance();
+  draw();
+}
+function updateDistance(){distanceEl.textContent=distance.toFixed(1)+" / 100 KM"}
+
+function start(){if(!running){running=true;statusEl.textContent="🚗 Gidiyor";lastTime=performance.now();requestAnimationFrame(loop)}}
+function command(cmd){
+  start();
+  if(cmd==="left") car.x-=55;
+  if(cmd==="right") car.x+=55;
+  car.x=Math.max(W*0.25+car.w/2,Math.min(W*0.75-car.w/2,car.x));
+}
+
+function spawnObstacle(){
+  const lane=[W*.32,W*.50,W*.68][Math.floor(Math.random()*3)];
+  obstacles.push({
+    x:lane,y:-70,w:55,h:55,type:obstacleTypes[Math.floor(Math.random()*obstacleTypes.length)],
+    hit:false
+  });
+}
+
+function collide(a,b){
+  return Math.abs(a.x-b.x)<(a.w+b.w)/2-7 &&
+         Math.abs(a.y-b.y)<(a.h+b.h)/2-8;
+}
+
+function loop(t){
+  if(!running)return;
+  const dt=Math.min((t-lastTime)/16.67,2); lastTime=t;
+  // Araba ileri komutu verilmişse hızlanır; yavaşça kaybolur.
+  car.speed=1.05;
+  distance += car.speed*0.018*dt;
+  roadOffset += car.speed*8*dt;
+  spawnTimer += dt;
+  if(spawnTimer>Math.max(28,60-car.speed*15)){spawnObstacle();spawnTimer=0}
+  obstacles.forEach(o=>o.y += (3.2+car.speed*3.2)*dt);
+  obstacles=obstacles.filter(o=>o.y<H+80);
+
+  for(const o of obstacles){
+    if(!o.hit && collide(car,o)){
+      o.hit=true;
+      running=false;
+      statusEl.textContent="💥 KAYBETTİNİZ!";
+      setTimeout(()=>{
+        reset();
+        start();
+      },1200);
+      return;
+    }
+  }
+  if(distance>=100){
+    distance=100; running=false; updateDistance();
+    statusEl.textContent="🏆 Kazandınız!";
+    message.style.display="flex";
+    draw(); return;
+  }
+  updateDistance(); draw(); requestAnimationFrame(loop);
+}
+
+function drawRoad(){
+  ctx.fillStyle="#79bd65";ctx.fillRect(0,0,W,H);
+  // roadside stripes
+  ctx.fillStyle="#d8d8d8";
+  ctx.fillRect(W*.23,0,W*.025,H);ctx.fillRect(W*.745,0,W*.025,H);
+  // asphalt
+  ctx.fillStyle="#4c535b";ctx.fillRect(W*.255,0,W*.49,H);
+  // moving lane markings
+  ctx.fillStyle="#f5f5f5";
+  const dashH=45,gap=35;
+  for(let y=-dashH+(roadOffset%(dashH+gap));y<H;y+=dashH+gap){
+    ctx.fillRect(W*.49,y,W*.018,dashH);
+  }
+  // distance scenery
+  ctx.fillStyle="#4d9b45";
+  for(let y=-30+(roadOffset%90);y<H;y+=90){
+    ctx.beginPath();ctx.arc(W*.12,y,18,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(W*.88,y+35,15,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function drawCar(){
+  const x=car.x,y=car.y;
+  ctx.save();
+  ctx.translate(x,y);
+  // shadow
+  ctx.fillStyle="#0005";ctx.beginPath();ctx.ellipse(0,35,32,12,0,0,Math.PI*2);ctx.fill();
+  // wheels
+  ctx.fillStyle="#111";
+  ctx.fillRect(-31,-27,10,25);ctx.fillRect(21,-27,10,25);
+  ctx.fillRect(-31,12,10,25);ctx.fillRect(21,12,10,25);
+  // body
+  ctx.fillStyle=colorInput.value;ctx.beginPath();
+  ctx.roundRect(-25,-41,50,82,12);ctx.fill();
+  // windows
+  ctx.fillStyle="#aee5f5";
+  ctx.beginPath();ctx.roundRect(-18,-30,36,23,7);ctx.fill();
+  ctx.beginPath();ctx.roundRect(-18,9,36,20,6);ctx.fill();
+  // lights
+  ctx.fillStyle="#fff6a8";ctx.fillRect(-20,-40,12,5);ctx.fillRect(8,-40,12,5);
+  ctx.restore();
+}
+
+function draw(){
+  drawRoad();
+  for(const o of obstacles){
+    ctx.font="48px Arial";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(o.type,o.x,o.y);
+  }
+  drawCar();
+}
+
+document.getElementById("left").addEventListener("pointerdown",()=>command("left"));
+document.getElementById("right").addEventListener("pointerdown",()=>command("right"));
+document.getElementById("restart").addEventListener("click",reset);
+document.getElementById("again").addEventListener("click",reset);
+
+window.addEventListener("keydown",e=>{
+  if(["ArrowLeft","ArrowRight","ArrowUp"].includes(e.key))e.preventDefault();
+  if(e.key==="ArrowLeft")command("left");
+  if(e.key==="ArrowRight")command("right");
+});
+
+reset();
+start();
+</script>
+</body>
+</html>
